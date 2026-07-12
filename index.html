@@ -50,6 +50,7 @@
   <button class="btn-retry hidden" id="retryBtn" onclick="resetRecording()">重新錄音</button>
 
   <div class="status" id="status"></div>
+  <a class="hidden" id="downloadLink" style="color:var(--brass); font-size:13px; margin-top:10px;">⬇ 下載錄音檔確認</a>
 
 <script>
   let mediaRecorder = null;
@@ -138,16 +139,28 @@
 
   function sendAudio(){
     if(!audioBlob){ setStatus('沒有錄音內容', true); return; }
+
+    if(!window.opener || window.opener.closed){
+      // 沒有開啟者視窗：代表這是獨立測試（例如直接貼網址開啟），不是從主頁面「直接錄音」按鈕跳出來的
+      // 這種情況下沒有地方可以接收錄音，改成提供下載連結方便確認錄音有沒有正常
+      setStatus('這是獨立開啟的測試模式，沒有偵測到主頁面，無法自動送出。已提供下載連結，可下載確認錄音正常；正式使用請從主 App 的「直接錄音」按鈕開啟本頁。', true);
+      const dl = document.getElementById('downloadLink');
+      dl.href = URL.createObjectURL(audioBlob);
+      dl.download = 'test-recording.' + (recordedMimeType.split('/')[1] || 'audio').split(';')[0];
+      dl.classList.remove('hidden');
+      return;
+    }
+
     setStatus('傳送中...');
     const reader = new FileReader();
     reader.onloadend = () => {
-      if(window.opener){
-        window.opener.postMessage({
-          type: 'AUDIO_CAPTURE_SUCCESS',
-          base64DataUrl: reader.result
-        }, '*');
-      }
+      window.opener.postMessage({
+        type: 'AUDIO_CAPTURE_SUCCESS',
+        base64DataUrl: reader.result
+      }, '*');
       window.close();
+      // 若瀏覽器基於安全限制無法關閉視窗（例如非本頁 script 開啟的），至少讓使用者知道已送出
+      setTimeout(()=>{ setStatus('已送出，若視窗沒有自動關閉，請手動關閉此分頁'); }, 800);
     };
     reader.readAsDataURL(audioBlob);
   }
