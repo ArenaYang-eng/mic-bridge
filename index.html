@@ -56,6 +56,26 @@
   let audioChunks = [];
   let audioBlob = null;
   let stream = null;
+  let recordedMimeType = 'audio/webm';
+
+  function pickSupportedMimeType(){
+    // iPhone Safari 實際上不支援錄成 webm，會用 mp4/AAC 之類的格式。
+    // 依序試探瀏覽器真正支援錄音的格式，不要寫死。
+    const candidates = [
+      'audio/mp4',
+      'audio/mp4;codecs=mp4a.40.2',
+      'audio/webm',
+      'audio/webm;codecs=opus',
+      'audio/ogg',
+      'audio/wav'
+    ];
+    if(window.MediaRecorder && MediaRecorder.isTypeSupported){
+      for(const type of candidates){
+        if(MediaRecorder.isTypeSupported(type)) return type;
+      }
+    }
+    return ''; // 交給瀏覽器自己決定
+  }
 
   function setStatus(msg, isError){
     const el = document.getElementById('status');
@@ -71,7 +91,10 @@
       return;
     }
     audioChunks = [];
-    mediaRecorder = new MediaRecorder(stream);
+    const chosenType = pickSupportedMimeType();
+    mediaRecorder = chosenType ? new MediaRecorder(stream, {mimeType: chosenType}) : new MediaRecorder(stream);
+    // 以 MediaRecorder 實際採用的格式為準（有些瀏覽器會忽略指定值，改用自己的預設值）
+    recordedMimeType = mediaRecorder.mimeType || chosenType || 'audio/webm';
     mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
     mediaRecorder.onstop = onRecordingStop;
     mediaRecorder.start();
@@ -79,7 +102,7 @@
     document.getElementById('dot').classList.add('recording');
     document.getElementById('startBtn').classList.add('hidden');
     document.getElementById('stopBtn').classList.remove('hidden');
-    setStatus('錄音中...');
+    setStatus('錄音中...（格式：' + recordedMimeType + '）');
   }
 
   function stopRecording(){
@@ -94,7 +117,7 @@
   }
 
   function onRecordingStop(){
-    audioBlob = new Blob(audioChunks, {type:'audio/webm'});
+    audioBlob = new Blob(audioChunks, {type: recordedMimeType});
     const url = URL.createObjectURL(audioBlob);
     const preview = document.getElementById('preview');
     preview.src = url;
