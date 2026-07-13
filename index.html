@@ -58,6 +58,17 @@
   let audioBlob = null;
   let stream = null;
   let recordedMimeType = 'audio/webm';
+  let parentRef = null;
+  let parentOrigin = '*';
+
+  // 主頁面會主動打招呼，記住是誰在跟我們說話（Apps Script sandbox 常常讓 window.opener 失效，
+  // 所以改用收到訊息時附帶的 event.source，這個一定是可靠的）
+  window.addEventListener('message', (e)=>{
+    if(e.data && e.data.type === 'PARENT_HELLO'){
+      parentRef = e.source;
+      parentOrigin = e.origin;
+    }
+  });
 
   function pickSupportedMimeType(){
     // iPhone Safari 實際上不支援錄成 webm，會用 mp4/AAC 之類的格式。
@@ -140,8 +151,12 @@
   function sendAudio(){
     if(!audioBlob){ setStatus('沒有錄音內容', true); return; }
 
-    if(!window.opener || window.opener.closed){
-      // 沒有開啟者視窗：代表這是獨立測試（例如直接貼網址開啟），不是從主頁面「直接錄音」按鈕跳出來的
+    const target = parentRef || window.opener;
+    let targetClosed = false;
+    try{ targetClosed = !target || target.closed; }catch(e){ targetClosed = !target; }
+
+    if(targetClosed){
+      // 沒有偵測到主頁面：代表這是獨立測試（例如直接貼網址開啟），不是從主頁面「直接錄音」按鈕跳出來的
       // 這種情況下沒有地方可以接收錄音，改成提供下載連結方便確認錄音有沒有正常
       setStatus('這是獨立開啟的測試模式，沒有偵測到主頁面，無法自動送出。已提供下載連結，可下載確認錄音正常；正式使用請從主 App 的「直接錄音」按鈕開啟本頁。', true);
       const dl = document.getElementById('downloadLink');
@@ -154,10 +169,10 @@
     setStatus('傳送中...');
     const reader = new FileReader();
     reader.onloadend = () => {
-      window.opener.postMessage({
+      target.postMessage({
         type: 'AUDIO_CAPTURE_SUCCESS',
         base64DataUrl: reader.result
-      }, '*');
+      }, parentOrigin || '*');
       window.close();
       // 若瀏覽器基於安全限制無法關閉視窗（例如非本頁 script 開啟的），至少讓使用者知道已送出
       setTimeout(()=>{ setStatus('已送出，若視窗沒有自動關閉，請手動關閉此分頁'); }, 800);
