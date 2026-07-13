@@ -58,17 +58,11 @@
   let audioBlob = null;
   let stream = null;
   let recordedMimeType = 'audio/webm';
-  let parentRef = null;
-  let parentOrigin = '*';
 
-  // 主頁面會主動打招呼，記住是誰在跟我們說話（Apps Script sandbox 常常讓 window.opener 失效，
-  // 所以改用收到訊息時附帶的 event.source，這個一定是可靠的）
-  window.addEventListener('message', (e)=>{
-    if(e.data && e.data.type === 'PARENT_HELLO'){
-      parentRef = e.source;
-      parentOrigin = e.origin;
-    }
-  });
+  const urlParams = new URLSearchParams(window.location.search);
+  const sessionId = urlParams.get('session') || '';
+  const targetUrl = urlParams.get('target') || '';
+  const recorderName = urlParams.get('name') || '';
 
   function pickSupportedMimeType(){
     // iPhone Safari 實際上不支援錄成 webm，會用 mp4/AAC 之類的格式。
@@ -151,14 +145,10 @@
   function sendAudio(){
     if(!audioBlob){ setStatus('沒有錄音內容', true); return; }
 
-    const target = parentRef || window.opener;
-    let targetClosed = false;
-    try{ targetClosed = !target || target.closed; }catch(e){ targetClosed = !target; }
-
-    if(targetClosed){
-      // 沒有偵測到主頁面：代表這是獨立測試（例如直接貼網址開啟），不是從主頁面「直接錄音」按鈕跳出來的
-      // 這種情況下沒有地方可以接收錄音，改成提供下載連結方便確認錄音有沒有正常
-      setStatus('這是獨立開啟的測試模式，沒有偵測到主頁面，無法自動送出。已提供下載連結，可下載確認錄音正常；正式使用請從主 App 的「直接錄音」按鈕開啟本頁。', true);
+    if(!sessionId || !targetUrl){
+      // 沒有從主 App 帶入必要參數：代表這是獨立測試（例如直接貼網址開啟），不是從主頁面「直接錄音」按鈕跳出來的
+      // 這種情況下不知道要上傳去哪，改成提供下載連結方便確認錄音有沒有正常
+      setStatus('這是獨立開啟的測試模式，缺少主 App 帶入的參數，無法自動上傳。已提供下載連結，可下載確認錄音正常；正式使用請從主 App 的「直接錄音」按鈕開啟本頁。', true);
       const dl = document.getElementById('downloadLink');
       dl.href = URL.createObjectURL(audioBlob);
       dl.download = 'test-recording.' + (recordedMimeType.split('/')[1] || 'audio').split(';')[0];
@@ -166,16 +156,34 @@
       return;
     }
 
-    setStatus('傳送中...');
+    setStatus('傳送中，AI 分析可能需要幾秒到十幾秒，請稍候...');
+    document.getElementById('sendBtn').disabled = true;
+
     const reader = new FileReader();
     reader.onloadend = () => {
-      target.postMessage({
-        type: 'AUDIO_CAPTURE_SUCCESS',
-        base64DataUrl: reader.result
-      }, parentOrigin || '*');
-      window.close();
-      // 若瀏覽器基於安全限制無法關閉視窗（例如非本頁 script 開啟的），至少讓使用者知道已送出
-      setTimeout(()=>{ setStatus('已送出，若視窗沒有自動關閉，請手動關閉此分頁'); }, 800);
+      const base64 = String(reader.result).split(',')[1] || '';
+      // 直接把錄音 POST 給 Apps Script 後端，伺服器端會立刻完成分析並暫存結果，
+      // 不透過分頁之間傳訊息，避開 window.opener 失效與 iOS 背景分頁節流的問題。
+      // Content-Type 用 text/plain 是刻意的：可以避開瀏覽器的 CORS 預檢請求（preflight），
+      // 讓這個 POST 屬於「簡單請求」，即使讀不到回應內容，後端還是會確實收到並執行。
+      fetch(targetUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'uploadBridgeAudio',
+          sessionId: sessionId,
+          base64Data: base64,
+          mimeType: recordedMimeType,
+          recorderName: recorderName
+        })
+      }).then(()=>{
+        setStatus('已送出，主頁面正在等候分析結果，這個視窗可以關閉了');
+        setTimeout(()=>{ window.close(); }, 1200);
+      }).catch((err)=>{
+        document.getElementById('sendBtn').disabled = false;
+        setStatus('傳送失敗，請檢查網路連線後再按一次「停止並送出」：' + err.message, true);
+      });
     };
     reader.readAsDataURL(audioBlob);
   }
