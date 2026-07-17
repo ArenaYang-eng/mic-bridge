@@ -38,7 +38,7 @@
 </head>
 <body>
   <h1>🎙 錄音橋接頁</h1>
-  <p>這個視窗獨立於主頁面，用來取得麥克風權限。<br>錄完音後按「停止並送出」，視窗會自動關閉並把錄音傳回主頁面。</p>
+  <p>這個視窗獨立於主頁面，用來取得麥克風權限。<br>錄完音後按「停止並送出」，會自動關閉或返回主頁面。</p>
 
   <div class="dot" id="dot">⏺</div>
 
@@ -178,14 +178,40 @@
           recorderName: recorderName
         })
       }).then(()=>{
-        setStatus('已送出，主頁面正在等候分析結果，這個視窗可以關閉了');
-        setTimeout(()=>{ window.close(); }, 1200);
+        setStatus('已送出，正在返回主頁面...');
+        document.getElementById('sendBtn').classList.add('hidden');
+        document.getElementById('retryBtn').classList.add('hidden');
+        showReturnLink();
+        attemptCloseOrReturn();
       }).catch((err)=>{
         document.getElementById('sendBtn').disabled = false;
         setStatus('傳送失敗，請檢查網路連線後再按一次「停止並送出」：' + err.message, true);
       });
     };
     reader.readAsDataURL(audioBlob);
+  }
+
+  // iOS Safari 對 window.close() 常常靜默失敗（不是 bug，是蘋果刻意的安全限制，
+  // 避免網站亂關使用者的分頁）。所以這裡先試著自動關閉，如果過一小段時間分頁還開著
+  // （代表關閉沒有生效），就直接把這個分頁導航回主 App 網址，使用者不用自己去找分頁切換。
+  function attemptCloseOrReturn(){
+    try{ window.close(); }catch(e){}
+    setTimeout(()=>{
+      if(targetUrl){
+        window.location.href = targetUrl;
+      }
+    }, 800);
+  }
+
+  // 送出成功的當下就先給一個可以馬上點的返回按鈕，不用乾等自動導航
+  function showReturnLink(){
+    if(!targetUrl) return;
+    const dl = document.getElementById('downloadLink');
+    dl.href = targetUrl;
+    dl.textContent = '✅ 已完成，點此立即返回主 App';
+    dl.style.fontSize = '15px';
+    dl.style.fontWeight = '600';
+    dl.classList.remove('hidden');
   }
 
   window.addEventListener('beforeunload', () => {
